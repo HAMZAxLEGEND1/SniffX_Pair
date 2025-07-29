@@ -1,39 +1,43 @@
-import express from "express";
-import { makeWASocket, useMultiFileAuthState } from "@whiskeysockets/baileys";
+const express = require('express');
+const { default: makeWASocket, useMultiFileAuthState, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
+const pino = require('pino');
+const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.use(cors());
+app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.send("✅ SniffX_Pair API is Live");
-});
+app.post('/pair', async (req, res) => {
+  const { phoneNumber } = req.body;
 
-app.get("/generate-code", async (req, res) => {
-  const { state, saveCreds } = await useMultiFileAuthState("auth_info");
+  if (!phoneNumber) {
+    return res.status(400).json({ error: 'Phone number required' });
+  }
 
-  const sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: false
-  });
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(`./session_${phoneNumber}`);
+    const sock = makeWASocket({
+      logger: pino({ level: 'silent' }),
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+      },
+      browser: ['Chrome', 'Linux', '110.0']
+    });
 
-  let sent = false;
-
-  sock.ev.on("connection.update", (update) => {
-    const { connection, qr } = update;
-
-    if (qr && !sent) {
-      sent = true;
-      res.json({ success: true, qr_code: qr });
+    if (!sock.authState.creds.registered) {
+      const code = await sock.requestPairingCode(phoneNumber.trim(), "HMZALGND");
+      res.json({ pairingCode: code });
+    } else {
+      res.status(400).json({ error: 'Number already registered' });
     }
 
-    if (connection === "open") {
-      console.log("✅ WhatsApp Connected");
-    }
-  });
-
-  sock.ev.on("creds.update", saveCreds);
+    sock.ev.on('creds.update', saveCreds);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.listen(PORT, () => {
-  console.log(`✅ SniffX_Pair API running on port ${PORT}`);
+app.listen(3000, () => {
+  console.log('Server running on port 3000');
 });
