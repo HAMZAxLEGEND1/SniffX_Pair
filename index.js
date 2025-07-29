@@ -13,7 +13,7 @@ app.post('/pair', (req, res) => {
   const { number } = req.body;
   if (!number) return res.status(400).json({ error: 'Number is required.' });
 
-  const pairCode = generatePairCode(number);
+  const pairCode = requestPairCode(number);
   res.json({ pairCode });
 });
 
@@ -22,13 +22,14 @@ app.get('/pair', (req, res) => {
   const number = req.query.number;
   if (!number) return res.status(400).json({ error: 'Number is required as query param.' });
 
-  const pairCode = generatePairCode(number);
+  const pairCode = requestPairCode(number);
   res.json({ pairCode });
 });
 
 // Pair code generation logic
-function generatePairCode(number) {
-  return 'PAIR-' + number.slice(-4) + '-' + Math.floor(Math.random() * 10000);
+function requestPairCode(number) {
+  const cleaned = number.replace(/[^0-9]/g, ''); // optional cleanup
+  return 'PAIR-' + cleaned.slice(-4) + '-' + Math.floor(Math.random() * 10000);
 }
 
 // Default route
