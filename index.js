@@ -1,53 +1,53 @@
-import express from 'express';
-import { makeWASocket, useMultiFileAuthState } from '@whiskeysockets/baileys';
+const express = require("express");
+const { default: makeWASocket, useSingleFileAuthState } = require("@whiskeysockets/baileys");
+const fs = require("fs");
+const qrcode = require("qrcode");
 
+const { state, saveState } = useSingleFileAuthState("./auth.json");
 const app = express();
-const PORT = process.env.PORT || 8080;
+const port = process.env.PORT || 8080;
 
-app.use(express.json());
+let sock;
+let currentPairingCode = null;
 
-app.post('/pair', async (req, res) => {
-  const number = req.body.number?.trim();
-  if (!number) return res.status(400).json({ error: 'Phone number is required' });
+// Pairing function
+async function startBot(number) {
+  sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: true,
+  });
+
+  sock.ev.on("creds.update", saveState);
+
+  if (!sock.authState.creds.registered) {
+    const code = await sock.requestPairingCode(number + "@s.whatsapp.net");
+    currentPairingCode = code;
+    console.log("Generated Pairing Code:", code);
+  }
+}
+
+// GET /pair?number=03001234567
+app.get("/pair", async (req, res) => {
+  const number = req.query.number;
+
+  if (!number || number.length < 10) {
+    return res.status(400).json({ error: "Number is required in query like ?number=03001234567" });
+  }
 
   try {
-    const { state, saveCreds } = await useMultiFileAuthState(`auth_info/${number}`);
-    const sock = makeWASocket({
-      auth: state,
-      printQRInTerminal: false,
-      browser: ['SniffX', 'Chrome', '1.0.0'],
-    });
-
-    let responded = false;
-
-    sock.ev.on('connection.update', async (update) => {
-      const { connection, pairingCode } = update;
-
-      if (pairingCode && !responded) {
-        responded = true;
-        res.json({ pairingCode });
-        sock.end(); // Close connection after code generated
-      }
-
-      if (connection === 'open') {
-        console.log(`[✅] Connected: ${number}`);
-      }
-
-      if (update.connection === 'close' && !responded) {
-        res.status(500).json({ error: 'Connection closed before code generated' });
-      }
-    });
-
+    await startBot(number);
+    res.json({ pairing_code: currentPairingCode });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error("Error generating pairing code:", err);
+    res.status(500).json({ error: "Failed to generate pairing code" });
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('✅ SniffX API Running. Use POST /pair with JSON { "number": "0300..." }');
+// Test default
+app.get("/", (req, res) => {
+  res.send("✅ SniffX API is Live. Use /pair?number=03001234567");
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 API server running on http://localhost:${PORT}`);
+app.listen(port, () => {
+  console.log(`SniffX API running on http://localhost:${port}`);
 });
