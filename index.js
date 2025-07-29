@@ -1,65 +1,80 @@
-import express from "express";
-import { Boom } from "@hapi/boom";
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion
-} from "@whiskeysockets/baileys";
-import fs from "fs";
-import path from "path";
+import express from 'express';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
+import NodeCache from 'node-cache';
 
 const app = express();
 app.use(express.json());
 
-app.post("/pair", async (req, res) => {
-  const phone = req.body.phone;
+const sessionCache = new NodeCache(); // In-memory cache for active sessions
 
-  if (!phone || !phone.startsWith("+")) {
-    return res.status(400).json({ success: false, message: "Invalid phone number format (e.g., +923001234567)" });
-  }
+const PORT = process.env.PORT || 8080;
 
-  const sessionFolder = path.join("sessions", phone.replace(/\+/g, ""));
-  const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
-  const { version } = await fetchLatestBaileysVersion();
-
-  const sock = makeWASocket({
-    version,
-    auth: state,
-    printQRInTerminal: false,
-    generateHighQualityLinkPreview: true,
-    browser: ["SniffX", "Chrome", "110.0.0.0"]
-  });
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, qr, pairingCode } = update;
-
-    if (qr) {
-      console.log("QR Received. Scan in WhatsApp Web.");
-    }
-
-    if (pairingCode) {
-      console.log("Pairing Code:", pairingCode);
-      res.json({
-        success: true,
-        pairing_code: pairingCode,
-        message: "Enter this code in your WhatsApp device to link it."
-      });
-    }
-
-    if (connection === "open") {
-      console.log("✅ Connected:", phone);
-      await saveCreds();
-    }
-
-    if (connection === "close") {
-      const reason = new Boom(update.lastDisconnect?.error)?.output?.statusCode;
-      if (reason !== DisconnectReason.loggedOut) {
-        console.log("Reconnecting...");
-      }
-    }
-  });
+app.get('/', (req, res) => {
+  res.send('✅ SniffX_Pair API is Live');
 });
 
-app.listen(3000, () => {
-  console.log("SniffX Pair API running on port 3000");
+app.post('/pair', async (req, res) => {
+  const { number } = req.body;
+
+  if (!number) {
+    return res.status(400).json({ success: false, message: 'Phone number is required.' });
+  }
+
+  const sessionId = `session-${number}`;
+  if (sessionCache.has(sessionId)) {
+    return res.status(400).json({ success: false, message: 'Pairing already in process for this number.' });
+  }
+
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${number}`);
+    const { version } = await fetchLatestBaileysVersion();
+
+    const sock = makeWASocket({
+      version,
+      auth: state,
+      printQRInTerminal: false,
+      getMessage: async () => ({ conversation: '🧠 Empty message placeholder' }),
+    });
+
+    sessionCache.set(sessionId, sock);
+
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, pairCode } = update;
+
+      if (connection === 'close') {
+        const reason = lastDisconnect?.error?.output?.statusCode;
+        if (reason !== DisconnectReason.loggedOut) {
+          console.log(`🔁 Reconnecting for ${number}`);
+        } else {
+          console.log(`❌ Logged out: ${number}`);
+          sessionCache.del(sessionId);
+        }
+      }
+
+      if (connection === 'open') {
+        console.log(`✅ Connected: ${number}`);
+        sessionCache.set(sessionId, sock);
+      }
+
+      if (pairCode) {
+        console.log(`📟 Pair code for ${number}: ${pairCode}`);
+        res.json({
+          success: true,
+          number,
+          pair_code: pairCode,
+          note: 'Use this code in WhatsApp app to pair your device.',
+        });
+      }
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Error during pairing.', error: err.message });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`✅ SniffX_Pair API running on port ${PORT}`);
 });
