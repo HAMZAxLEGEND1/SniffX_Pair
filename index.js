@@ -1,5 +1,5 @@
 import express from "express";
-import makeWASocket, { useMultiFileAuthState } from "@whiskeysockets/baileys";
+import { makeWASocket, useMultiFileAuthState } from "@whiskeysockets/baileys";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
