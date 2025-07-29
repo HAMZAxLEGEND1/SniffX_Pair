@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get("/", (req, res) => {
-  res.send("✅ Risparity API Live");
+  res.send("✅ SniffX_Pair API is Live");
 });
 
 app.get("/generate-code", async (req, res) => {
@@ -35,5 +35,5 @@ app.get("/generate-code", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Risparity API running on port ${PORT}`);
+  console.log(`✅ SniffX_Pair API running on port ${PORT}`);
 });
