@@ -1,62 +1,41 @@
-import express from "express";
-import makeWASocket, { useSingleFileAuthState } from "@whiskeysockets/baileys";
-import fs from "fs";
+import express from 'express';
+import cors from 'cors';
 
-const { state, saveState } = useSingleFileAuthState("./auth.json");
 const app = express();
 const port = process.env.PORT || 8080;
 
-let sock;
-let currentPairingCode = null;
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-// Pairing logic
-async function startBot(number) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      sock = makeWASocket({
-        auth: state,
-        printQRInTerminal: true,
-      });
+// POST endpoint
+app.post('/pair', (req, res) => {
+  const { number } = req.body;
+  if (!number) return res.status(400).json({ error: 'Number is required.' });
 
-      sock.ev.on("creds.update", saveState);
-
-      if (!sock.authState.creds.registered) {
-        const code = await sock.requestPairingCode(number + "@s.whatsapp.net");
-        currentPairingCode = code;
-        console.log("✅ Pairing code generated:", code);
-        resolve(code);
-      } else {
-        reject("Already registered");
-      }
-    } catch (err) {
-      console.error("❌ Error in startBot:", err);
-      reject(err);
-    }
-  });
-}
-
-app.get("/pair", async (req, res) => {
-  const number = req.query.number;
-
-  if (!number || !/^[0-9]{10,13}$/.test(number)) {
-    return res.status(400).json({ error: "❌ Invalid or missing number. Use ?number=03001234567" });
-  }
-
-  try {
-    const code = await startBot(number);
-    if (!code) {
-      return res.status(500).json({ error: "⚠️ Pairing code not available" });
-    }
-    return res.json({ pairing_code: code });
-  } catch (err) {
-    return res.status(500).json({ error: "❌ Failed to generate code", details: err.toString() });
-  }
+  const pairCode = generatePairCode(number);
+  res.json({ pairCode });
 });
 
-app.get("/", (req, res) => {
-  res.send("✅ SniffX API is Live. Use /pair?number=03001234567");
+// GET endpoint
+app.get('/pair', (req, res) => {
+  const number = req.query.number;
+  if (!number) return res.status(400).json({ error: 'Number is required as query param.' });
+
+  const pairCode = generatePairCode(number);
+  res.json({ pairCode });
+});
+
+// Pair code generation logic
+function generatePairCode(number) {
+  return 'PAIR-' + number.slice(-4) + '-' + Math.floor(Math.random() * 10000);
+}
+
+// Default route
+app.get('/', (req, res) => {
+  res.send('✅ SniffX API Running. Use POST /pair with JSON { "number": "0300..." } or GET /pair?number=...');
 });
 
 app.listen(port, () => {
-  console.log(`🚀 SniffX API running on http://localhost:${port}`);
+  console.log(`✅ SniffX API running on port ${port}`);
 });
