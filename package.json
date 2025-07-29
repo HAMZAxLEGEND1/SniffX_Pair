@@ -8,6 +8,6 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "@whiskeysockets/baileys": "github:HAMZAxLEGEND1/bailey"
+    "@whiskeysockets/baileys": "^6.7.1"
   }
 }
