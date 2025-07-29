@@ -1,64 +1,64 @@
-import { default as makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
-import { Boom } from '@hapi/boom';
 import express from 'express';
-import P from 'pino';
+import makeWASocket, {
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  requestPairingCode
+} from '@whiskeysockets/baileys';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 app.use(express.json());
 
-const port = process.env.PORT || 3000;
-
-async function startSocket(phoneNumber) {
-  const { state, saveCreds } = await useMultiFileAuthState(`./sessions/${phoneNumber}`);
-  
-  const sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: false,
-    logger: P({ level: 'silent' }),
-    browser: ['SniffX', 'Chrome', '1.0.0'],
-    generateHighQualityLinkPreview: true
-  });
-
-  sock.ev.on('creds.update', saveCreds);
-
-  if (!sock.authState.creds.registered) {
-    const code = await sock.requestPairingCode(phoneNumber); // Must be in international format
-    console.log('Pairing Code:', code);
-    return code;
+app.post('/pair', async (req, res) => {
+  const phone = req.body.phone;
+  if (!phone || !phone.startsWith('+')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid phone number. Use international format like +923001234567',
+    });
   }
 
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update;
-    if (connection === 'close') {
-      const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('connection closed due to', lastDisconnect.error, ', reconnecting', shouldReconnect);
-      if (shouldReconnect) startSocket(phoneNumber);
-    } else if (connection === 'open') {
-      console.log('opened connection ✅');
-    }
-  });
-
-  return null;
-}
-
-// API endpoint
-app.post('/pair', async (req, res) => {
-  const phone = req.body.phone; // Format: +923001234567
-  if (!phone) return res.status(400).json({ success: false, message: 'Phone number required' });
-
   try {
-    const code = await startSocket(phone);
-    if (code) {
-      return res.json({ success: true, code });
-    } else {
-      return res.json({ success: false, message: 'Already paired' });
-    }
+    const sessionPath = `./sessions/${phone.replace(/\+/g, '')}`;
+    if (!fs.existsSync(sessionPath)) fs.mkdirSync(sessionPath, { recursive: true });
+
+    const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+    const { version } = await fetchLatestBaileysVersion();
+
+    const sock = makeWASocket({
+      version,
+      printQRInTerminal: false,
+      auth: state,
+      browser: ['SniffX Bot', 'Chrome', '1.0.0'],
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+
+    const code = await requestPairingCode(phone, sock); // example: "123-456"
+    console.log(`✅ Pairing code for ${phone}: ${code}`);
+
+    res.json({
+      success: true,
+      pairing_code: code,
+      message: 'Enter this code in your WhatsApp device to link it.',
+    });
+
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ success: false, message: 'Failed to get pairing code' });
+    res.status(500).json({
+      success: false,
+      message: 'Error generating pairing code',
+      error: err.message || err.toString(),
+    });
   }
 });
 
-app.listen(port, () => {
-  console.log(`✅ SniffX_Pair API is Live on Port ${port}`);
+app.get('/', (req, res) => {
+  res.send('SniffX Pairing API by Mr Legend Hub 🧠');
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 SniffX Pairing API is running on http://localhost:${PORT}`);
 });
